@@ -1,13 +1,13 @@
 param(
     [ValidateSet("vs2013", "vs2015", "nupkg-only")]
     [Parameter(Position = 0)] 
-    [string] $Target = "vs2012",
+    [string] $Target = "vs2013",
     [Parameter(Position = 1)]
     [string] $Version = "45.0.0",
     [Parameter(Position = 2)]
     [string] $AssemblyVersion = "45.0.0",
     [Parameter(Position = 3)]
-    [string] $RedistVersion = "3.2454.1317"
+    [string] $RedistVersion = "3.2454.1342"
 )
 
 $WorkingDir = split-path -parent $MyInvocation.MyCommand.Definition

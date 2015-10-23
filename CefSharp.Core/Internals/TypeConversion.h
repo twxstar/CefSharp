@@ -4,12 +4,14 @@
 
 #pragma once
 
-#include "include/internal/cef_ptr.h"
-#include "include/cef_download_item.h"
-#include "Internals/StringUtils.h"
+#include "Stdafx.h"
 
-using namespace System;
-using namespace CefSharp;
+#include "include/internal/cef_ptr.h"
+#include "include\cef_download_item.h"
+#include "include\cef_response.h"
+#include "include\cef_web_plugin.h"
+
+using namespace System::Collections::Generic;
 
 namespace CefSharp
 {
@@ -86,6 +88,23 @@ namespace CefSharp
                 managedWebPluginInfo->Version = StringUtils::ToClr(webPluginInfo->GetVersion());
 
                 return managedWebPluginInfo;
+            }
+
+            static IList<DraggableRegion>^ FromNative(const std::vector<CefDraggableRegion>& regions)
+            {
+                if (regions.size() == 0)
+                {
+                    return nullptr;
+                }
+
+                auto list = gcnew List<DraggableRegion>();
+
+                for each (CefDraggableRegion region in regions)
+                {
+                    list->Add(DraggableRegion(region.bounds.width, region.bounds.height, region.bounds.x, region.bounds.y, region.draggable == 1));
+                }
+                
+                return list;
             }
         };
     }

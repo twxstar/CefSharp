@@ -5,11 +5,8 @@
 #pragma once
 
 #include "Stdafx.h"
-#include "Internals/StringUtils.h"
 
-using namespace System;
 using namespace System::Collections::Generic;
-using namespace CefSharp::Internals;
 
 namespace CefSharp
 {
@@ -35,6 +32,9 @@ namespace CefSharp
 
             //Automatically discovered and load a system-wide installation of Pepper Flash.
             _cefCommandLineArgs->Add("enable-system-flash", "1");
+
+            //Temp workaround for https://github.com/cefsharp/CefSharp/issues/1203
+            _cefCommandLineArgs->Add("process-per-tab", "1");
         }
 
         !CefSettings()
@@ -65,6 +65,7 @@ namespace CefSharp
         property bool MultiThreadedMessageLoop
         {
             bool get() { return _cefSettings->multi_threaded_message_loop == 1; }
+            void set(bool value) { _cefSettings->multi_threaded_message_loop = value; }
         }
 
         property String^ BrowserSubprocessPath

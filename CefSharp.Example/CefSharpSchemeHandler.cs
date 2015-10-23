@@ -44,6 +44,7 @@ namespace CefSharp.Example
                 { "/SchemeTest.html", Resources.SchemeTest },
                 { "/TooltipTest.html", Resources.TooltipTest },
                 { "/FramedWebGLTest.html", Resources.FramedWebGLTest },
+                { "/MultiBindingTest.html", Resources.MultiBindingTest },
             };
         }
 
@@ -60,6 +61,28 @@ namespace CefSharp.Example
                 stream = (MemoryStream)resourceHandler.Stream;
                 mimeType = "text/html";
                 callback.Continue();
+                return true;
+            }
+
+            if (string.Equals(fileName, "/PostDataAjaxTest.html", StringComparison.OrdinalIgnoreCase))
+            {
+                var postData = request.PostData;
+                if(postData == null)
+                {
+                    var resourceHandler = ResourceHandler.FromString("Post Data: null");
+                    stream = (MemoryStream)resourceHandler.Stream;
+                    mimeType = "text/html";
+                    callback.Continue();
+                }
+                else
+                { 
+                    var postDataElement = postData.Elements.FirstOrDefault();
+                    var resourceHandler = ResourceHandler.FromString("Post Data: " + (postDataElement == null ? "null" : postDataElement.GetBody()));
+                    stream = (MemoryStream)resourceHandler.Stream;
+                    mimeType = "text/html";
+                    callback.Continue();
+                }
+
                 return true;
             }
 

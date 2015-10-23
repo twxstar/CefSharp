@@ -22,9 +22,15 @@ namespace CefSharp
 
         gcroot<Action<CefBrowserWrapper^>^> _onBrowserCreated;
         gcroot<Action<CefBrowserWrapper^>^> _onBrowserDestroyed;
-        gcroot<Dictionary<int, CefBrowserWrapper^>^> _browserWrappers;
+        gcroot<ConcurrentDictionary<int, CefBrowserWrapper^>^> _browserWrappers;
         gcroot<List<CefExtension^>^> _extensions;
         gcroot<List<CefCustomScheme^>^> _schemes;
+
+        // The serialized registered object data waiting to be used (only contains methods and bound async).
+        gcroot<JavascriptRootObject^> _javascriptAsyncRootObject;
+
+        // The serialized registered object data waiting to be used.
+        gcroot<JavascriptRootObject^> _javascriptRootObject;
 
     public:
         static const CefString kPromiseCreatorFunction;
@@ -33,14 +39,22 @@ namespace CefSharp
         {
             _onBrowserCreated = onBrowserCreated;
             _onBrowserDestroyed = onBrowserDestoryed;
-            _browserWrappers = gcnew Dictionary<int, CefBrowserWrapper^>();
+            _browserWrappers = gcnew ConcurrentDictionary<int, CefBrowserWrapper^>();
             _extensions = gcnew List<CefExtension^>();
             _schemes = schemes;
         }
 
         ~CefAppUnmanagedWrapper()
         {
-            delete _browserWrappers;
+            if (!Object::ReferenceEquals(_browserWrappers, nullptr))
+            {
+                for each(CefBrowserWrapper^ browser in Enumerable::OfType<CefBrowserWrapper^>(_browserWrappers))
+                {
+                    delete browser;
+                }
+
+                _browserWrappers = nullptr;
+            }
             delete _onBrowserCreated;
             delete _onBrowserDestroyed;
             delete _extensions;

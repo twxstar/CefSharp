@@ -14,7 +14,6 @@
 #include "..\CefSharp.Core\Internals\Messaging\Messages.h"
 #include "..\CefSharp.Core\Internals\Serialization\Primitives.h"
 
-using namespace System;
 using namespace System::Diagnostics;
 using namespace System::Collections::Generic;
 using namespace CefSharp::Internals::Messaging;
@@ -25,11 +24,12 @@ namespace CefSharp
     const CefString CefAppUnmanagedWrapper::kPromiseCreatorFunction = "cefsharp_CreatePromise";
     const CefString CefAppUnmanagedWrapper::kPromiseCreatorScript = ""
         "function cefsharp_CreatePromise() {"
-        "   var object = {};"
+        "   var result = {};"
         "   var promise = new Promise(function(resolve, reject) {"
-        "       object.resolve = resolve;object.reject = reject;"
+        "       result.res = resolve; result.rej = reject;"
         "   });"
-        "   return{ p: promise, res : object.resolve,  rej: object.reject};"
+        "   result.p = promise;"
+        "   return result;"
         "}";
 
     CefRefPtr<CefRenderProcessHandler> CefAppUnmanagedWrapper::GetRenderProcessHandler()
@@ -44,16 +44,14 @@ namespace CefSharp
         _onBrowserCreated->Invoke(wrapper);
 
         //Multiple CefBrowserWrappers created when opening popups
-        _browserWrappers->Add(browser->GetIdentifier(), wrapper);
+        _browserWrappers->TryAdd(browser->GetIdentifier(), wrapper);
     }
 
     void CefAppUnmanagedWrapper::OnBrowserDestroyed(CefRefPtr<CefBrowser> browser)
     {
-        auto wrapper = FindBrowserWrapper(browser->GetIdentifier(), false);
-
-        if (wrapper != nullptr)
+        CefBrowserWrapper^ wrapper;
+        if (_browserWrappers->TryRemove(browser->GetIdentifier(), wrapper))
         {
-            _browserWrappers->Remove(wrapper->BrowserId);
             _onBrowserDestroyed->Invoke(wrapper);
             delete wrapper;
         }
@@ -61,23 +59,37 @@ namespace CefSharp
 
     void CefAppUnmanagedWrapper::OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context)
     {
-        auto wrapper = FindBrowserWrapper(browser->GetIdentifier(), true);
+        auto browserWrapper = FindBrowserWrapper(browser->GetIdentifier(), true);
 
-        if (wrapper->JavascriptRootObject != nullptr || wrapper->JavascriptAsyncRootObject != nullptr)
+        auto rootObjectWrappers = browserWrapper->JavascriptRootObjectWrappers;
+        auto frameId = frame->GetIdentifier();
+
+        if (rootObjectWrappers->ContainsKey(frameId))
         {
-            wrapper->JavascriptRootObjectWrapper = gcnew JavascriptRootObjectWrapper(browser->GetIdentifier(), wrapper->JavascriptRootObject, wrapper->JavascriptAsyncRootObject, wrapper->BrowserProcess);
-            wrapper->JavascriptRootObjectWrapper->Bind(context->GetGlobal());
+            LOG(WARNING) << "A context has been created for the same browser / frame without context released called previously";
+        }
+        else
+        {
+            auto rootObject = gcnew JavascriptRootObjectWrapper(browser->GetIdentifier(), browserWrapper->BrowserProcess);
+            if (!Object::ReferenceEquals(_javascriptRootObject, nullptr) || !Object::ReferenceEquals(_javascriptAsyncRootObject, nullptr))
+            {
+                rootObject->Bind(_javascriptRootObject, _javascriptAsyncRootObject, context->GetGlobal());
+            }
+
+            rootObjectWrappers->TryAdd(frameId, rootObject);
         }
     };
 
     void CefAppUnmanagedWrapper::OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context)
     { 
-        auto wrapper = FindBrowserWrapper(browser->GetIdentifier(), true);
+        auto browserWrapper = FindBrowserWrapper(browser->GetIdentifier(), true);
 
-        if (wrapper->JavascriptRootObjectWrapper != nullptr)
+        auto rootObjectWrappers = browserWrapper->JavascriptRootObjectWrappers;
+        
+        JavascriptRootObjectWrapper^ wrapper;
+        if (rootObjectWrappers->TryRemove(frame->GetIdentifier(), wrapper))
         {
-            delete wrapper->JavascriptRootObjectWrapper;
-            wrapper->JavascriptRootObjectWrapper = nullptr;
+            delete wrapper;
         }
     };
 
@@ -144,24 +156,37 @@ namespace CefSharp
             return true;
         }
     
-        auto rootObjectWrapper = browserWrapper->JavascriptRootObjectWrapper;
-        auto callbackRegistry = rootObjectWrapper != nullptr ? rootObjectWrapper->CallbackRegistry : nullptr;
         //these messages are roughly handled the same way
         if (name == kEvaluateJavascriptRequest || name == kJavascriptCallbackRequest)
         {
-            bool success;
+            bool success = false;
             CefRefPtr<CefV8Value> result;
             CefString errorMessage;
             CefRefPtr<CefProcessMessage> response;
-            //both messages have the callbackid stored at index 1
-            int64 callbackId = GetInt64(argList, 1);
 
             if (name == kEvaluateJavascriptRequest)
             {
-                auto frameId = GetInt64(argList, 0);
-                auto script = argList->GetString(2);
-
                 response = CefProcessMessage::Create(kEvaluateJavascriptResponse);
+            }
+            else
+            {
+                response = CefProcessMessage::Create(kJavascriptCallbackResponse);
+            }
+
+            //both messages have the frameId stored at 0 and callbackId stored at index 1
+            auto frameId = GetInt64(argList, 0);
+            int64 callbackId = GetInt64(argList, 1);
+
+            JavascriptRootObjectWrapper^ rootObjectWrapper;
+            browserWrapper->JavascriptRootObjectWrappers->TryGetValue(frameId, rootObjectWrapper);
+            auto callbackRegistry = rootObjectWrapper == nullptr ? nullptr : rootObjectWrapper->CallbackRegistry;
+            if (callbackRegistry == nullptr)
+            {
+                errorMessage = StringUtils::ToNative("Frame " + frameId + " is no longer available, most likely the Frame has been Disposed.");
+            }
+            else if (name == kEvaluateJavascriptRequest)
+            {
+                auto script = argList->GetString(2);
 
                 auto frame = browser->GetFrame(frameId);
                 if (frame.get())
@@ -198,102 +223,118 @@ namespace CefSharp
                 }
                 else
                 {
-                    errorMessage = "Unable to Get Frame matching Id";
+                    errorMessage = StringUtils::ToNative("Frame " + frameId + " is no longer available, most likely the Frame has been Disposed or Removed.");
                 }
             }
             else
             {
-                auto jsCallbackId = GetInt64(argList, 0);
-                auto parameterList = argList->GetList(2);
+                auto jsCallbackId = GetInt64(argList, 2);
+                auto parameterList = argList->GetList(3);
                 CefV8ValueList params;
                 for (CefV8ValueList::size_type i = 0; i < parameterList->GetSize(); i++)
                 {
                     params.push_back(DeserializeV8Object(parameterList, static_cast<int>(i)));
                 }
 
-                response = CefProcessMessage::Create(kJavascriptCallbackResponse);
-
                 auto callbackWrapper = callbackRegistry->FindWrapper(jsCallbackId);
-                auto context = callbackWrapper->GetContext();
-                auto value = callbackWrapper->GetValue();
-                
-                if (context.get() && context->Enter())
+                if (callbackWrapper == nullptr)
                 {
-                    try
-                    {
-                        result = value->ExecuteFunction(nullptr, params);
-                        success = result.get() != nullptr;
-                        
-                        //we need to do this here to be able to store the v8context
-                        if (success)
-                        {
-                            auto responseArgList = response->GetArgumentList();
-                            SerializeV8Object(result, responseArgList, 2, callbackRegistry);
-                        }
-                        else
-                        {
-                            auto exception = value->GetException();
-                            if (exception.get())
-                            {
-                                errorMessage = exception->GetMessage();
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        context->Exit();
-                    }
+                    errorMessage = "Unable to find callbackWrapper";
                 }
                 else
                 {
-                    errorMessage = "Unable to Enter Context";			
-                }                
+                    auto context = callbackWrapper->GetContext();
+                    auto value = callbackWrapper->GetValue();
+                
+                    if (context.get() && context->Enter())
+                    {
+                        try
+                        {
+                            result = value->ExecuteFunction(nullptr, params);
+                            success = result.get() != nullptr;
+                        
+                            //we need to do this here to be able to store the v8context
+                            if (success)
+                            {
+                                auto responseArgList = response->GetArgumentList();
+                                SerializeV8Object(result, responseArgList, 2, callbackRegistry);
+                            }
+                            else
+                            {
+                                auto exception = value->GetException();
+                                if (exception.get())
+                                {
+                                    errorMessage = exception->GetMessage();
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            context->Exit();
+                        }
+                    }
+                    else
+                    {
+                        errorMessage = "Unable to Enter Context";
+                    }
+                }
             }
 
-            if (response.get())
+            auto responseArgList = response->GetArgumentList();
+            responseArgList->SetBool(0, success);
+            SetInt64(callbackId, responseArgList, 1);
+            if (!success)
             {
-                auto responseArgList = response->GetArgumentList();
-                responseArgList->SetBool(0, success);
-                SetInt64(callbackId, responseArgList, 1);
-                if (!success)
-                {
-                    responseArgList->SetString(2, errorMessage);
-                }
-                browser->SendProcessMessage(sourceProcessId, response);
+                responseArgList->SetString(2, errorMessage);
             }
+            browser->SendProcessMessage(sourceProcessId, response);
 
             handled = true;
         }
         else if (name == kJavascriptCallbackDestroyRequest)
         {
             auto jsCallbackId = GetInt64(argList, 0);
-            callbackRegistry->Deregister(jsCallbackId);
+            auto frameId = GetInt64(argList, 1);
+            JavascriptRootObjectWrapper^ rootObjectWrapper;
+            browserWrapper->JavascriptRootObjectWrappers->TryGetValue(frameId, rootObjectWrapper);
+            if (rootObjectWrapper != nullptr && rootObjectWrapper->CallbackRegistry != nullptr)
+            {
+                rootObjectWrapper->CallbackRegistry->Deregister(jsCallbackId);
+            }
 
             handled = true;
         }
         else if (name == kJavascriptRootObjectRequest)
         {
-            browserWrapper->JavascriptAsyncRootObject = DeserializeJsRootObject(argList, 0);
-            browserWrapper->JavascriptRootObject = DeserializeJsRootObject(argList, 1);
+            _javascriptAsyncRootObject = DeserializeJsRootObject(argList, 0);
+            _javascriptRootObject = DeserializeJsRootObject(argList, 1);
             handled = true;
         }
-        else if (name == kJavascriptAsyncMethodCallResponse && rootObjectWrapper != nullptr)
+        else if (name == kJavascriptAsyncMethodCallResponse)
         {
-            auto callbackId = GetInt64(argList, 0);
-            JavascriptAsyncMethodCallback^ callback;
-            if (rootObjectWrapper->TryGetAndRemoveMethodCallback(callbackId, callback))
+            auto frameId = GetInt64(argList, 0);
+            auto callbackId = GetInt64(argList, 1);
+            
+            JavascriptRootObjectWrapper^ rootObjectWrapper;
+            browserWrapper->JavascriptRootObjectWrappers->TryGetValue(frameId, rootObjectWrapper);
+
+            if (rootObjectWrapper != nullptr)
             {
-                auto success = argList->GetBool(1);
-                if (success)
+                JavascriptAsyncMethodCallback^ callback;
+                if (rootObjectWrapper->TryGetAndRemoveMethodCallback(callbackId, callback))
                 {
-                    callback->Success(DeserializeV8Object(argList, 2));
+                    auto success = argList->GetBool(2);
+                    if (success)
+                    {
+                        callback->Success(DeserializeV8Object(argList, 3));
+                    }
+                    else
+                    {
+                        callback->Fail(argList->GetString(3));
+                    }
+                    //dispose
+                    delete callback;
                 }
-                else
-                {
-                    callback->Fail(argList->GetString(2));
-                }
-                //dispose
-                delete callback;
             }
             handled = true;
         }

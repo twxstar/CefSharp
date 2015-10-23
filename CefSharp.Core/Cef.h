@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "Stdafx.h"
+
 #include <msclr/lock.h>
 #include <include/cef_version.h>
 #include <include/cef_runnable.h>
@@ -11,17 +13,12 @@
 #include <include/cef_web_plugin.h>
 
 #include "Internals/CefSharpApp.h"
-#include "Internals/CookieVisitor.h"
 #include "Internals/CookieManager.h"
-#include "Internals/CefCompletionCallbackAdapter.h"
-#include "Internals/StringUtils.h"
 #include "Internals/PluginVisitor.h"
-#include "ManagedCefBrowserAdapter.h"
 #include "CefSettings.h"
-#include "ResourceHandlerWrapper.h"
 #include "SchemeHandlerFactoryWrapper.h"
 #include "Internals/CefTaskScheduler.h"
-#include "CookieAsyncWrapper.h"
+#include "Internals/CefGetGeolocationCallbackWrapper.h"
 
 using namespace System::Collections::Generic; 
 using namespace System::Linq;
@@ -212,6 +209,17 @@ namespace CefSharp
             }
 
             return success;
+        }
+
+        /// <summary>Perform a single iteration of CEF message loop processing. This function is
+        /// used to integrate the CEF message loop into an existing application message
+        /// loop. Care must be taken to balance performance against excessive CPU usage.
+        /// This function should only be called on the main application thread and only
+        /// if CefInitialize() is called with a CefSettings.multi_threaded_message_loop
+        /// value of false. This function will not block.</summary>
+        static void DoMessageLoopWork()
+        {
+            CefDoMessageLoopWork();
         }
 
         /// <summary>Add an entry to the cross-origin whitelist.</summary>
@@ -420,6 +428,31 @@ namespace CefSharp
         static void ForceWebPluginShutdown(String^ path)
         {
             CefForceWebPluginShutdown(StringUtils::ToNative(path));
+        }
+
+        /// <summary>
+        /// Call during process startup to enable High-DPI support on Windows 7 or newer.
+        /// Older versions of Windows should be left DPI-unaware because they do not
+        /// support DirectWrite and GDI fonts are kerned very badly.
+        /// </summary>
+        static void EnableHighDPISupport()
+        {
+            CefEnableHighDPISupport();
+        }
+
+        /// <summary>
+        /// Request a one-time geolocation update.
+        /// This function bypasses any user permission checks so should only be
+        /// used by code that is allowed to access location information. 
+        /// </summary>
+        /// <return>Returns 'best available' location info or, if the location update failed, with error info.</return>
+        static Task<Geoposition^>^ GetGeolocationAsync()
+        {
+            auto callback = new CefGetGeolocationCallbackWrapper();
+            
+            CefGetGeolocation(callback);
+
+            return callback->GetTask();
         }
     };
 }

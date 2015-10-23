@@ -454,6 +454,23 @@ namespace CefSharp
         }
 
         /// <summary>
+        /// Asynchronously prints the current browser contents to the PDF file specified.
+        /// The caller is responsible for deleting the file when done.
+        /// </summary>
+        /// <param name="cefBrowser">The <see cref="IBrowser"/> object this method extends.</param>
+        /// <param name="path">Output file location.</param>
+        /// <param name="settings">Print Settings.</param>
+        /// <returns>A task that represents the asynchronous print operation.
+        /// The result is true on success or false on failure to generate the Pdf.</returns>
+        public static Task<bool> PrintToPdfAsync(this IBrowser cefBrowser, string path, PdfPrintSettings settings = null)
+        {
+            var host = cefBrowser.GetHost();
+            ThrowExceptionIfBrowserHostNull(host);
+
+            return host.PrintToPdfAsync(path, settings);
+        }
+
+        /// <summary>
         /// Opens a Print Dialog which if used (can be user cancelled) will print the browser contents.
         /// </summary>
         /// <param name="browser">The ChromiumWebBrowser instance this method extends</param>
@@ -463,6 +480,23 @@ namespace CefSharp
             ThrowExceptionIfBrowserNull(cefBrowser);
 
             cefBrowser.Print();
+        }
+
+        /// <summary>
+        /// Asynchronously prints the current browser contents to the PDF file specified.
+        /// The caller is responsible for deleting the file when done.
+        /// </summary>
+        /// <param name="browser">The ChromiumWebBrowser instance this method extends</param>
+        /// <param name="path">Output file location.</param>
+        /// <param name="settings">Print Settings.</param>
+        /// <returns>A task that represents the asynchronous print operation.
+        /// The result is true on success or false on failure to generate the Pdf.</returns>
+        public static Task<bool> PrintToPdfAsync(this IWebBrowser browser, string path, PdfPrintSettings settings = null)
+        {
+            var cefBrowser = browser.GetBrowser();
+            ThrowExceptionIfBrowserNull(cefBrowser);
+
+            return cefBrowser.PrintToPdfAsync(path, settings);
         }
 
         /// <summary>

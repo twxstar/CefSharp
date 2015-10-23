@@ -4,9 +4,11 @@
 
 #pragma once
 
+#include "Stdafx.h"
+
 #include "CefWrapper.h"
 
-using namespace System;
+using namespace System::Threading::Tasks;
 
 namespace CefSharp
 {
@@ -39,6 +41,7 @@ namespace CefSharp
         public:
             virtual void StartDownload(String^ url);
             virtual void Print();
+            virtual Task<bool>^ PrintToPdfAsync(String^ path, PdfPrintSettings^ settings);
             virtual void SetZoomLevel(double zoomLevel);
             virtual Task<double>^ GetZoomLevelAsync();
             virtual IntPtr GetWindowHandle();
